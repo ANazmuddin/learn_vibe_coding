@@ -1,14 +1,14 @@
 import { Elysia, t } from 'elysia';
 import { db } from './db';
 import { tasks } from './db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, like, count } from 'drizzle-orm';
 import { baseAuth } from './auth';
 
 export const tasksPlugin = new Elysia()
   .use(baseAuth)
   .group('/api', (app) => 
     app.guard({
-      beforeHandle({ user, set }) {
+      beforeHandle({ user, set }: any) {
         if (!user) {
           set.status = 401;
           return { error: 'Unauthorized' };
@@ -18,7 +18,7 @@ export const tasksPlugin = new Elysia()
       app
         .post(
           '/tasks',
-          async ({ body, user }) => {
+          async ({ body, user }: any) => {
             const { title, description } = body;
             
             const [result] = await db.insert(tasks).values({
@@ -39,12 +39,61 @@ export const tasksPlugin = new Elysia()
             }),
           }
         )
-        .get('/tasks', async ({ user }) => {
-          return await db.select().from(tasks).where(eq(tasks.userId, user!.id));
-        })
+        .get(
+          '/tasks', 
+          async ({ user, query }: any) => {
+            const { page = 1, limit = 10, isCompleted, search } = query;
+            const offset = (page - 1) * limit;
+
+            const whereConditions = [eq(tasks.userId, user!.id)];
+
+            if (isCompleted !== undefined) {
+              whereConditions.push(eq(tasks.isCompleted, isCompleted));
+            }
+
+            if (search) {
+              whereConditions.push(like(tasks.title, `%${search}%`));
+            }
+
+            const finalWhere = and(...whereConditions);
+
+            const [totalCountResult] = await db
+              .select({ count: count() })
+              .from(tasks)
+              .where(finalWhere);
+
+            const data = await db
+              .select()
+              .from(tasks)
+              .where(finalWhere)
+              .limit(limit)
+              .offset(offset);
+
+            const total = totalCountResult?.count || 0;
+            const totalPages = Math.ceil(total / limit);
+
+            return {
+              data,
+              meta: {
+                total,
+                totalPages,
+                page,
+                limit,
+              },
+            };
+          },
+          {
+            query: t.Object({
+              page: t.Optional(t.Numeric({ minimum: 1 })),
+              limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100 })),
+              isCompleted: t.Optional(t.Boolean()),
+              search: t.Optional(t.String()),
+            }),
+          }
+        )
         .patch(
           '/tasks/:id',
-          async ({ params: { id }, body, user, set }) => {
+          async ({ params: { id }, body, user, set }: any) => {
             const taskId = Number(id);
             
             const [task] = await db
@@ -78,7 +127,7 @@ export const tasksPlugin = new Elysia()
             }),
           }
         )
-        .delete('/tasks/:id', async ({ params: { id }, user, set }) => {
+        .delete('/tasks/:id', async ({ params: { id }, user, set }: any) => {
           const taskId = Number(id);
           
           const [task] = await db

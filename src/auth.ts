@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia';
 import { db } from './db';
 import { users, sessions } from './db/schema';
 import { eq, and, gt } from 'drizzle-orm';
+import { rateLimit } from 'elysia-rate-limit';
 
 interface User {
   id: number;
@@ -38,6 +39,11 @@ export const baseAuth = new Elysia({ name: 'baseAuth' })
 
 export const auth = new Elysia({ prefix: '/api' })
   .use(baseAuth)
+  .use(process.env.NODE_ENV === 'test' ? (app) => app : rateLimit({
+    max: 10,
+    duration: 60000,
+    errorResponse: 'Too many requests'
+  }))
   .post(
     '/register',
     async ({ body, set }) => {
@@ -103,7 +109,7 @@ export const auth = new Elysia({ prefix: '/api' })
       }),
     }
   )
-  .post('/logout', async ({ user, cookie: { session }, set }) => {
+  .post('/logout', async ({ user, cookie: { session }, set }: any) => {
     if (!user) {
       set.status = 401;
       return { error: 'Unauthorized' };
@@ -117,7 +123,7 @@ export const auth = new Elysia({ prefix: '/api' })
 
     return { message: 'Logged out successfully' };
   })
-  .get('/me', async ({ user, set }) => {
+  .get('/me', async ({ user, set }: any) => {
     if (!user) {
       set.status = 401;
       return { error: 'Unauthorized' };

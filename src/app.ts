@@ -1,6 +1,8 @@
 import { Elysia } from 'elysia';
 import { auth } from './auth';
 import { tasksPlugin } from './tasks';
+import { categoriesPlugin } from './categories';
+import { usersPlugin } from './users';
 import { cors } from '@elysiajs/cors';
 
 export const app = new Elysia()
@@ -30,5 +32,7 @@ export const app = new Elysia()
   })
   .use(auth)
   .use(tasksPlugin)
+  .use(categoriesPlugin)
+  .use(usersPlugin)
   .get('/', () => 'Hello Elysia!')
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }));

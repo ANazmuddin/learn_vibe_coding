@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { db } from './db';
 import { tasks } from './db/schema';
-import { eq, and, like, count } from 'drizzle-orm';
+import { eq, and, like, count, lt, gte, lte } from 'drizzle-orm';
 import { baseAuth } from './auth';
 
 export const tasksPlugin = new Elysia()
@@ -19,11 +19,13 @@ export const tasksPlugin = new Elysia()
         .post(
           '/tasks',
           async ({ body, user }: any) => {
-            const { title, description } = body;
+            const { title, description, categoryId, dueDate } = body;
             
             const [result] = await db.insert(tasks).values({
               title,
               description,
+              categoryId: categoryId ?? null,
+              dueDate: dueDate ? new Date(dueDate) : null,
               userId: user!.id,
             });
 
@@ -36,13 +38,15 @@ export const tasksPlugin = new Elysia()
             body: t.Object({
               title: t.String(),
               description: t.Optional(t.String()),
+              categoryId: t.Optional(t.Numeric()),
+              dueDate: t.Optional(t.String({ format: 'date-time' })),
             }),
           }
         )
         .get(
           '/tasks', 
           async ({ user, query }: any) => {
-            const { page = 1, limit = 10, isCompleted, search } = query;
+            const { page = 1, limit = 10, isCompleted, search, categoryId, overdue, dueToday } = query;
             const offset = (page - 1) * limit;
 
             const whereConditions = [eq(tasks.userId, user!.id)];
@@ -53,6 +57,24 @@ export const tasksPlugin = new Elysia()
 
             if (search) {
               whereConditions.push(like(tasks.title, `%${search}%`));
+            }
+
+            if (categoryId !== undefined) {
+              whereConditions.push(eq(tasks.categoryId, categoryId));
+            }
+
+            const now = new Date();
+
+            if (overdue === true) {
+              whereConditions.push(lt(tasks.dueDate, now));
+              whereConditions.push(eq(tasks.isCompleted, false));
+            }
+
+            if (dueToday === true) {
+              const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+              const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+              whereConditions.push(gte(tasks.dueDate, startOfDay));
+              whereConditions.push(lte(tasks.dueDate, endOfDay));
             }
 
             const finalWhere = and(...whereConditions);
@@ -88,6 +110,9 @@ export const tasksPlugin = new Elysia()
               limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100 })),
               isCompleted: t.Optional(t.Boolean()),
               search: t.Optional(t.String()),
+              categoryId: t.Optional(t.Numeric()),
+              overdue: t.Optional(t.Boolean()),
+              dueToday: t.Optional(t.Boolean()),
             }),
           }
         )
@@ -106,12 +131,14 @@ export const tasksPlugin = new Elysia()
               return { error: 'Task not found' };
             }
 
+            const updateData: any = { ...body, updatedAt: new Date() };
+            if (body.dueDate !== undefined) {
+              updateData.dueDate = body.dueDate ? new Date(body.dueDate) : null;
+            }
+
             await db
               .update(tasks)
-              .set({
-                ...body,
-                updatedAt: new Date(),
-              })
+              .set(updateData)
               .where(eq(tasks.id, taskId));
 
             return { message: 'Task updated successfully' };
@@ -124,6 +151,8 @@ export const tasksPlugin = new Elysia()
               title: t.Optional(t.String()),
               description: t.Optional(t.String()),
               isCompleted: t.Optional(t.Boolean()),
+              categoryId: t.Optional(t.Nullable(t.Numeric())),
+              dueDate: t.Optional(t.Nullable(t.String({ format: 'date-time' }))),
             }),
           }
         )
